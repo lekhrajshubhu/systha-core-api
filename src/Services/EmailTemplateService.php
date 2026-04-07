@@ -41,8 +41,6 @@ class EmailTemplateService
             // Parse dynamic fields from text
             $dynamicFields = array_filter(array_map('trim', explode(',', $this->template->temp_json)));
 
-            // dd($dynamicFields);
-            // dd($dynamicFields);
             $this->validateFields($dynamicFields);
 
             // Replace placeholders with actual values

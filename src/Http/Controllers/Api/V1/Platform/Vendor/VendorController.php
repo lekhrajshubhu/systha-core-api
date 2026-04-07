@@ -5,14 +5,17 @@ namespace Systha\Core\Http\Controllers\Api\V1\Platform\Vendor;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Systha\Core\Http\Resources\NearByVendorResource;
 use Systha\Core\Models\Company;
 use Systha\Core\Models\ServiceCategory;
 use Systha\Core\Models\Vendor;
 use Systha\Core\Models\VendorAvailability;
 use Systha\Core\Models\VendorMembership;
+use Systha\Core\Models\VendorMenuComponent;
 use Systha\Core\Models\VendorTemplate;
 
 /**
@@ -306,13 +309,106 @@ class VendorController extends Controller
             $vendor = Vendor::query()
                 ->where('is_deleted', 0)
                 ->where('vendor_code', $code)
+                ->with(['offerList' => function ($query) {
+                    $query->with(['coupon', 'vendor:id,vendor_code,name,profile_pic']);
+                }, 'services'])
                 ->firstOrFail();
 
+                $defaultTemplate = $vendor->templates()->where('is_default', 1)->first();
+
+
+            $offers = $vendor->offerList->map(static function ($package) {
+                return [
+                    'id' => $package->id,
+                    'vendor' => [
+                        'logo' => $package->vendor->logo ?? null,
+                        'code' => $package->vendor->vendor_code ?? null,
+                        'name' => $package->vendor->name ?? null,
+                    ],
+                    'badge' => $package->coupon->name ?? null,
+                    'title' => $package->coupon->description ?? null,
+                    'subtitle' => $package->package_name ?? $package->name,
+                    'image' => $package->thumbnail_url ?? null,
+                ];
+            })->values();
+
+            $wordPool = [
+                'Trusted', 'Premium', 'Local', 'Certified', 'Friendly',
+                'Quality', 'Reliable', 'Fast', 'Expert', 'Affordable',
+                'Secure', 'Professional', 'Express', 'Complete', 'Smart',
+            ];
+
+            $serviceList = $vendor->services->map(static function ($service) use ($wordPool) {
+                $meta = $service->meta ?? [];
+                if (!is_array($meta)) {
+                    $decoded = json_decode((string) $meta, true);
+                    $meta = is_array($decoded) ? $decoded : [];
+                }
+
+                $subtitle = implode(' ', Arr::random($wordPool, min(3, count($wordPool))));
+
+                return [
+                    'id' => $service->id,
+                    'name' => $service->service_name ?? $service->name ?? null,
+                    'icon' => $meta['icon_md'] ?? $meta['icon'] ?? null,
+                    'sub_title' => $subtitle,
+                ];
+            })->values();
+
+            $vendor->makeHidden(['offerList', 'services']);
+
+            $vendor["faq_list"] = collect();
+            $vendor["blog_list"] = collect();
+            if($defaultTemplate){
+                $faqcomponent = VendorMenuComponent::where([
+                    "vendor_template_id" => $defaultTemplate->id,
+                    "is_faq" => 1
+                ])->get();
+    
+                if($faqcomponent->isEmpty()){
+                    $faqPosts = collect();
+                }else{
+                    $faqcomponent->load('posts:id,component_id,title,sub_title');
+                    $faqPosts = $faqcomponent->flatMap->posts->map(function ($post) {
+                        return [
+                            'id' => $post->id,
+                            'title' => $post->title,
+                            'sub_title' => $post->sub_title,
+                        ];
+                    })->values();
+                }
+                $vendor["faq_list"] = $faqPosts;
+    
+                $blogComponent = VendorMenuComponent::where([
+                    "vendor_template_id" => $defaultTemplate->id,
+                    "is_blog" => 1
+                ])->get();
+    
+                if($blogComponent->isEmpty()){
+                    $blogPosts = collect();
+                }else{
+                    $blogComponent->load('posts:id,component_id,title,sub_title,post_image_link');
+                    $blogPosts = $blogComponent->flatMap->posts->map(function ($post) {
+                        return [
+                            'id' => $post->id,
+                            'title' => $post->title,
+                            'sub_title' => $post->sub_title,
+                            'image' => $post->thumbnail_url,
+                        ];
+                    })->values();
+                }
+                $vendor["blog_list"] = $blogPosts;
+            }
+
+
+            $vendor["offers"] = $offers;
+            $vendor["service_list"] = $serviceList;
+            // $vendor["default_template"] = $defaultTemplate;
             return response([
                 'data' => $vendor,
             ]);
         } catch (\Throwable $th) {
-            return response(['error' => $th->getMessage()], 422);
+            return response(['error' => $th->getMessage(),"line" => $th->getLine()], 422);
         }
     }
 
@@ -566,7 +662,46 @@ class VendorController extends Controller
             return response()->json(["error" => "Vendor not found"], 404);
         }
 
-        $packages = $vendor->packageList()->with('plans')->get();
+        $packages = $vendor->offerList()->with('plans')->get();
+
+        $data = $packages->map(function ($package) {
+            return [
+                'id' => $package->id,
+                'name' => $package->package_name ?? $package->name,
+                'description' => strip_tags($package->description),
+                'plans' => $package->plans->map(function ($plan) {
+                    $billingUnit = $this->formatBillingUnit($plan->duration, $plan->type_name);
+
+                    $payload = [
+                        'id' => $plan->id,
+                        'name' => $plan->type_name,
+                        'description' => strip_tags($plan->description),
+                        'price' => $plan->amount,
+                        'billingUnit' => $billingUnit,
+                        'features' => [],
+                    ];
+
+                    if (!empty($plan->badge)) {
+                        $payload['badge'] = $plan->badge;
+                    }
+
+                    return $payload;
+                })->values(),
+            ];
+        })->values();
+
+        return response()->json([
+            'data' => $data,
+        ], 200);
+    }
+    public function scheduleList(Request $request, $vendorCode)
+    {
+        $vendor = Vendor::where('vendor_code', $vendorCode)->where('is_deleted', 0)->first();
+        if (!$vendor) {
+            return response()->json(["error" => "Vendor not found"], 404);
+        }
+
+        $packages = $vendor->scheduleList()->with('plans')->get();
 
         $data = $packages->map(function ($package) {
             return [

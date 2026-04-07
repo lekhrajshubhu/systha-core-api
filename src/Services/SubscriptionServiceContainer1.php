@@ -19,17 +19,15 @@ use Systha\Core\Models\SubscriptionCart;
 use Systha\Core\Models\SubscriptionPayment;
 
 
-class SubscriptionServiceContainer
+class SubscriptionServiceContainer1
 {
     protected $stripe;
-    protected $stripeCustomerService;
     protected $messageService;
 
-    public function __construct(
-        StripeCustomerService $stripeCustomerService,
-    )
+    public function __construct(MessageService $messageService)
     {
-        $this->stripeCustomerService = $stripeCustomerService;
+        // $this->stripe = $stripe;
+        $this->messageService = $messageService;
     }
 
     public function subscribe(PackageType $packageType, ClientModel $client, Address $address, $stripeToken, $startDate, $startTime)
@@ -43,25 +41,23 @@ class SubscriptionServiceContainer
             $packageSubscription = $this->createPackageSubscription($packageType, $client, $startDate, $startTime);
 
 
-            header('Access-Control-Allow-Origin: *');
-     
+            // dd($packageSubscription);
             // intialize stripe
             $this->stripe = new StripeSub($packageType->vendor);
 
-            $stripeCustomer = $this->stripeCustomerService->getStripeCustomer($packageType->vendor, $client, $this->stripe);
-            // $test = $this->stripe->attachStripeTokenToCustomer($stripeCustomer->stripe_customer_id, $stripeToken);
-            // dd($stripeCustomer);
+
+            // dd($this->stripe);
 
             // create stripe customer
-            // $customer = $this->stripe->customers->create([
-            //     'name' => $client->fname . " " . $client->lname,
-            //     'email' => $client->email,
-            //     'phone' => $client->phone_no,
-            // ]);
+            $customer = $this->stripe->createCustomer([
+                'name' => $client->fname . " " . $client->lname,
+                'email' => $client->email,
+                'phone' => $client->phone_no,
+            ]);
 
             // dd($customer);
             // stripe attach stripeToken to stripe customer
-            $card = $this->stripe->createCard($stripeToken, $stripeCustomer->stripe_customer_id);
+            $card = $this->stripe->createCard($stripeToken, $customer->id);
             dd($card);
             // prepare data form stripe subscription payment
             $sub_data = [
@@ -142,18 +138,15 @@ class SubscriptionServiceContainer
     private function createPackageSubscription($packageType, $client, $startDate, $startTime)
     {
         return PackageSubscription::create([
-            
-            'vendor_id' => $packageType->vendor_id,
-            'client_id' => $client->id,
-            
-            'package_id' => $packageType->package_id,
-            'package_type_id' => $packageType->id,
-            'price' => $packageType->amount,
-            
+            'state' => 'publish',
             'start_date' => $startDate,
             'preferred_time' => $startTime,
-            
             'status' => 'new',
+            'package_id' => $packageType->package_id,
+            'package_type_id' => $packageType->id,
+            'vendor_id' => $packageType->vendor_id,
+            'price' => $packageType->amount,
+            'client_id' => $client->id,
             'is_active' => 1,
         ]);
     }

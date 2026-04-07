@@ -4,20 +4,21 @@ namespace Systha\Core\Http\Controllers\Api\V1\Platform;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
-use Systha\Core\Models\Client;
+
+use Systha\Core\Models\ClientModel;
 use Tymon\JWTAuth\JWTGuard;
 
 /**
  * @group Platform
  * @property-read JWTGuard $platformGuard
- * @property-read ?Client $user
+ * @property-read ?ClientModel $user
  * @property-read \Tymon\JWTAuth\Token|string|null $token
  * @property-read array $profileData
  */
 class PlatformBaseController extends Controller
 {
     protected JWTGuard $platformGuard;
-    protected ?Client $user = null;
+    protected ?ClientModel $user = null;
     protected \Tymon\JWTAuth\Token|string|null $token = null;
     protected array $profileData = [];
 
@@ -29,10 +30,10 @@ class PlatformBaseController extends Controller
         $this->profileData = $this->buildProfileData();
     }
 
-    protected function resolveUser(): ?Client
+    protected function resolveUser(): ?ClientModel
     {
         $authUser = $this->platformGuard->user();
-        if ($authUser instanceof Client) {
+        if ($authUser instanceof ClientModel) {
             return $authUser;
         }
 
@@ -42,7 +43,7 @@ class PlatformBaseController extends Controller
 
         $userId = $this->platformGuard->payload()->get('sub');
 
-        return Client::where('is_deleted', 0)->find($userId);
+        return ClientModel::where('is_deleted', 0)->find($userId);
     }
 
     protected function refreshTokenAndUser(): array

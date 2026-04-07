@@ -2,16 +2,15 @@
 
 namespace Systha\Core\Services;
 
-use Stripe\Stripe;
-use Stripe\Invoice;
+use Illuminate\Support\Facades\Log;
 use Stripe\Customer;
-use Stripe\StripeClient;
-use Stripe\Subscription;
+use Stripe\Exception\ApiErrorException;
 use Stripe\PaymentIntent;
 use Stripe\PaymentMethod;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Systha\Core\Models\Client;
+use Stripe\SetupIntent;
+use Stripe\Subscription;
+use Stripe\Stripe;
+use Stripe\StripeClient;
 use Systha\Core\Models\ClientModel;
 use Systha\Core\Models\StripeCustomer;
 use Systha\Core\Models\VendorModel;
@@ -23,16 +22,14 @@ class StripeService
 
     public function __construct(VendorModel $vendor)
     {
-        $this->secret = $vendor->defaultPaymentCredential->val2;
+        $this->secret = optional($vendor->defaultPaymentCredential)->val2
+            ?? config('services.stripe.secret');
 
-        // For static methods (e.g. \Stripe\Customer::create())
         Stripe::setApiKey($this->secret);
-
-        // For object-oriented methods
         $this->stripe = new StripeClient($this->secret);
     }
 
-    public function findStripeCustomerForVendor(ClientModel $client, VendorModel $vendor): ?Customer
+    public function findStripeCustomerForVendor(ClientModel $client, VendorModel $vendor): Customer
     {
         $stripeCustomer = StripeCustomer::where([
             'client_id' => $client->id,
@@ -43,303 +40,239 @@ class StripeService
             return $this->stripe->customers->retrieve($stripeCustomer->stripe_customer_id, []);
         }
 
-         $payload = [
-            'name' => trim($client->fname . ' ' . $client->lname),
+        $payload = [
+            'name' => trim(($client->fname ?? '') . ' ' . ($client->lname ?? '')),
             'email' => $client->email,
-            'phone' => $client->phone1,
+            'phone' => $client->phone1 ?? $client->phone_no ?? null,
             'metadata' => [
-                'client_id' => (int) $client->id,
-                'vendor_id' => (int) $vendor->id,
+                'client_id' => (string) $client->id,
+                'vendor_id' => (string) $vendor->id,
             ],
         ];
 
-        $customer = $this->stripe->customers->create($payload);
-        StripeCustomer::create([
-            'client_id' => $client->id,
-            'vendor_id' => $vendor->id,
-            'stripe_customer_id' => $customer->id,
-            'email' => $client->email,
-            'name' => trim($client->fname . ' ' . $client->lname),
-            'phone' => $client->phone1,
-        ]);
-        return $customer;
-    }
-
-
-    public function stripeCustomer(array $params): ?StripeCustomer
-    {
-        $stripeCustomer = StripeCustomer::where('email', $params["customer_email"])->first();
-
-        if ($stripeCustomer && $stripeCustomer->stripe_customer_id) {
-
-            $customer = Customer::retrieve($stripeCustomer->stripe_customer_id);
-            return $stripeCustomer;
-        }
-
-        // Find or create the client
-        $client = Client::firstOrCreate(
-            ['email' => $params["customer_email"]],
-            [
-                'fname' => $params["name"] ?? '',
-                'lname' => $params["lname"] ?? 'Guest',
-                'phone_no' => $params["phone"] ?? null,
-            ]
-        );
-
-        $customer = Customer::create([
-            'email' => $params["customer_email"],
-            'name' => $params["customer_name"],
-            'phone' => $params["customer_phone"]
-        ]);
-
-        if (!$stripeCustomer) {
-            $stripeCustomer = new StripeCustomer();
-
-            $stripeCustomer->client_id = $client->id;
-            $stripeCustomer->email = $params["customer_email"];
-            $stripeCustomer->name = $params["customer_name"];
-            $stripeCustomer->phone = $params["customer_phone"];
-            $stripeCustomer->default_payment_method_id = $params["payment_method_id"];
-        }
-
-        $stripeCustomer->stripe_customer_id = $customer->id;
-        $stripeCustomer->save();
-
-        return $stripeCustomer;
-    }
-
-    public function attachStripeMethod(string $paymentMethodId, StripeCustomer $stripeCustomer)
-    {
         try {
-            $paymentMethod = PaymentMethod::retrieve($paymentMethodId);
-
-            $card = $paymentMethod->card;
-            $cardName = $paymentMethod->billing_details->name;
-
-            $this->stripe->paymentMethods->attach($paymentMethodId, [
-                'customer' => $stripeCustomer->stripe_customer_id
+            $customer = $this->stripe->customers->create($payload);
+            StripeCustomer::create([
+                'client_id' => $client->id,
+                'vendor_id' => $vendor->id,
+                'stripe_customer_id' => $customer->id,
+                'email' => $client->email,
+                'name' => $payload['name'],
+                'phone' => $payload['phone'],
             ]);
+            return $customer;
+        } catch (ApiErrorException $e) {
+            Log::error('Stripe create customer failed', [
+                'client_id' => $client->id,
+                'vendor_id' => $vendor->id,
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
 
-            // // Store locally if not already stored
-            $existing = $stripeCustomer->paymentMethods()->where('payment_method_id', $paymentMethodId)->first();
-            if (!$existing) {
-                $existing = $stripeCustomer->paymentMethods()->create([
-                    'client_id' => $stripeCustomer->client_id,
-                    'payment_method_id' => $paymentMethodId,
-                    'card_name' => $cardName,
-                    'card_brand' => $card->brand,
-                    'card_last4' => $card->last4,
-                    'exp_month' => $card->exp_month,
-                    'exp_year' => $card->exp_year,
-                    'funding' => $card->funding,
-                    'country' => $card->country,
-                ]);
-            }
+    public function createPaymentIntentForVendorClient(
+        ClientModel $client,
+        VendorModel $vendor,
+        int $amount,
+        string $currency = 'usd',
+        array $metadata = [],
+        bool $saveForFuture = true,
+        ?string $idempotencyKey = null
+    ): PaymentIntent {
+        $customer = $this->findStripeCustomerForVendor($client, $vendor);
+        $metadata = $this->withBaseMetadata($metadata, $client, $vendor);
 
-            $stripeCustomer->default_payment_method_id = $existing->payment_method_id;
+        $payload = [
+            'customer' => $customer->id,
+            'amount' => $amount,
+            'currency' => $currency,
+            'automatic_payment_methods' => ['enabled' => true],
+            'metadata' => $metadata,
+        ];
+
+        if ($saveForFuture) {
+            $payload['setup_future_usage'] = 'off_session';
+        }
+
+        return $this->stripe->paymentIntents->create($payload, $this->idempotencyArray($idempotencyKey));
+    }
+
+    public function createSetupIntentForVendorClient(
+        ClientModel $client,
+        VendorModel $vendor,
+        array $metadata = [],
+        ?string $idempotencyKey = null
+    ): SetupIntent {
+        $customer = $this->findStripeCustomerForVendor($client, $vendor);
+        $metadata = $this->withBaseMetadata($metadata, $client, $vendor);
+
+        return $this->stripe->setupIntents->create([
+            'customer' => $customer->id,
+            'payment_method_types' => ['card'],
+            'metadata' => $metadata,
+        ], $this->idempotencyArray($idempotencyKey));
+    }
+
+    public function retrievePaymentIntent(string $paymentIntentId): PaymentIntent
+    {
+        return $this->stripe->paymentIntents->retrieve($paymentIntentId, []);
+    }
+
+    public function retrieveSetupIntent(string $setupIntentId): SetupIntent
+    {
+        return $this->stripe->setupIntents->retrieve($setupIntentId, []);
+    }
+
+    public function retrievePaymentMethod(string $paymentMethodId): PaymentMethod
+    {
+        return $this->stripe->paymentMethods->retrieve($paymentMethodId, []);
+    }
+
+    public function chargeSavedPaymentMethod(
+        ClientModel $client,
+        VendorModel $vendor,
+        string $paymentMethodId,
+        int $amount,
+        string $currency = 'usd',
+        array $metadata = [],
+        ?string $idempotencyKey = null
+    ): PaymentIntent {
+        $customer = $this->findStripeCustomerForVendor($client, $vendor);
+        $metadata = $this->withBaseMetadata($metadata, $client, $vendor);
+
+        return $this->stripe->paymentIntents->create([
+            'customer' => $customer->id,
+            'amount' => $amount,
+            'currency' => $currency,
+            'payment_method' => $paymentMethodId,
+            'off_session' => true,
+            'confirm' => true,
+            'metadata' => $metadata,
+        ], $this->idempotencyArray($idempotencyKey));
+    }
+
+    public function createSubscriptionWithPrice(
+        string $customerId,
+        string $priceId,
+        ?string $paymentMethodId = null,
+        array $metadata = [],
+        ?string $idempotencyKey = null
+    ): Subscription {
+        $payload = [
+            'customer' => $customerId,
+            'items' => [
+                ['price' => $priceId],
+            ],
+            'metadata' => $metadata,
+            'expand' => ['latest_invoice.payment_intent'],
+        ];
+
+        if ($paymentMethodId) {
+            $payload['default_payment_method'] = $paymentMethodId;
+        }
+
+        return $this->stripe->subscriptions->create($payload, $this->idempotencyArray($idempotencyKey));
+    }
+
+    public function storePaymentMethodDetails(
+        StripeCustomer $stripeCustomer,
+        PaymentMethod $paymentMethod,
+        bool $isDefault = false
+    ): void {
+        if (!method_exists($stripeCustomer, 'paymentMethods')) {
+            return;
+        }
+
+        $card = $paymentMethod->card;
+        $existing = $stripeCustomer->paymentMethods()
+            ->where('payment_method_id', $paymentMethod->id)
+            ->first();
+
+        $record = $existing ?? $stripeCustomer->paymentMethods()->create([
+            'client_id' => $stripeCustomer->client_id,
+            'payment_method_id' => $paymentMethod->id,
+            'card_name' => $paymentMethod->billing_details->name,
+            'card_brand' => $card->brand,
+            'card_last4' => $card->last4,
+            'exp_month' => $card->exp_month,
+            'exp_year' => $card->exp_year,
+            'funding' => $card->funding,
+            'country' => $card->country,
+        ]);
+
+        if ($isDefault) {
+            $stripeCustomer->paymentMethods()->where('id', '!=', $record->id)->update(['is_default' => 0]);
+            $record->is_default = 1;
+            $record->save();
+            $stripeCustomer->default_payment_method_id = $record->payment_method_id;
             $stripeCustomer->save();
-            // Set all other payment methods to is_default = 0
-            $stripeCustomer->paymentMethods()->where('id', '!=', $existing->id)->update(['is_default' => 0]);
-
-            // Set current one to is_default = 1
-            $existing->is_default = 1;
-            $existing->save();
-
-
-            // // Return the local stored payment method record for further use
-            return $existing;
-        } catch (\Stripe\Exception\ApiErrorException $e) {
-            Log::error("Stripe API error in attachStripeMethod: " . $e->getMessage(), [
-                'payment_method_id' => $paymentMethodId,
-                'customer_id' => $stripeCustomer->stripe_customer_id,
-                'stripe_code' => $e->getStripeCode(),
-                'http_status' => $e->getHttpStatus(),
-            ]);
-            dd($e->getMessage());
-            return null;
-        } catch (\Exception $e) {
-            dd($e->getMessage());
-            Log::error("General error in attachStripeMethod: " . $e->getMessage());
-            return null;
         }
     }
 
-    public function addPaymentMethod(array $params)
+    private function withBaseMetadata(array $metadata, ClientModel $client, VendorModel $vendor): array
     {
-        try {
-            $customer = $this->stripeCustomer($params);
-            $card = $this->attachStripeMethod($params["payment_method_id"], $customer);
+        $base = [
+            'client_id' => (string) $client->id,
+            'vendor_id' => (string) $vendor->id,
+        ];
 
-            return response(["message" => "New card added", "data" => $card], 200);
-        } catch (\Throwable $th) {
-            return response(["error" => $th->getMessage()], 422);
+        foreach ($metadata as $key => $value) {
+            $base[$key] = is_scalar($value) ? (string) $value : json_encode($value);
         }
+
+        return $base;
     }
 
-    public function createPaymentIntent(array $params): ?PaymentIntent
+    private function idempotencyArray(?string $key): array
     {
-
-        DB::beginTransaction();
-        try {
-            // Ensure amount and payment method are provided
-            if (!isset($params['amount'], $params['payment_method_id'], $params['customer_email'])) {
-                throw new \InvalidArgumentException('Missing required parameters.');
-            }
-
-            // If stripe_customer_id is already available
-            if (!empty($params["stripe_customer_id"])) {
-                return PaymentIntent::create([
-                    'amount' => intval($params['amount'] * 100),
-                    'currency' => $params['currency'] ?? 'usd',
-                    'customer' => $params['stripe_customer_id'],
-                    'payment_method' => $params['payment_method_id'],
-                    'receipt_email' => $params['customer_email'],
-                    'confirmation_method' => 'automatic',
-                    'setup_future_usage' => $params['setup_future_usage'] ?? 'off_session',
-                    'metadata' => $params['metadata'] ?? [],
-                ]);
-            }
-
-            // Otherwise, create or get customer and attach method
-            $customer = $this->stripeCustomer($params);
-
-            if (!$customer || !isset($customer->id)) {
-                throw new \Exception('Failed to retrieve or create Stripe customer.');
-            }
-
-            $this->attachStripeMethod($params["payment_method_id"], $customer);
-
-            $paymentIntent = PaymentIntent::create([
-                'amount' => intval($params['amount'] * 100),
-                'currency' => $params['currency'] ?? 'usd',
-                'customer' => $customer->stripe_customer_id,
-                'payment_method' => $params['payment_method_id'],
-                'receipt_email' => $params['customer_email'],
-                'confirmation_method' => 'automatic',
-                // 'confirm' => true,
-                'setup_future_usage' => $params['setup_future_usage'] ?? 'off_session',
-                'metadata' => $params['metadata'] ?? [],
-            ]);
-            DB::commit();
-            return $paymentIntent;
-        } catch (\Throwable $e) {
-            Log::error("Stripe PaymentIntent Error: " . $e->getMessage(), [
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'params' => $params,
-            ]);
-
-            dd($e->getMessage());
-            return null;
-        }
+        return $key ? ['idempotency_key' => $key] : [];
     }
 
-
-    // public function createSubscription(string $customerId, string $priceId, string $paymentMethodId = null): ?Subscription
-    // {
-    //     try {
-    //         $subscription = Subscription::create([
-    //             'customer' => $customerId,
-    //             'items' => [
-    //                 ['price' => $priceId],
-    //             ],
-    //             'payment_settings' => [
-    //                 'payment_method_types' => ['card'],
-    //                 'save_default_payment_method' => 'on_subscription',
-    //                 'payment_method_options' => [],
-    //             ],
-    //             'default_payment_method' => $paymentMethodId,
-    //             'expand' => ['latest_invoice.payment_intent'],
-    //         ]);
-
-    //         return $subscription;
-    //     } catch (\Exception $e) {
-    //         Log::error("Stripe subscription error: " . $e->getMessage());
-    //         return null;
-    //     }
-    // }
-    public function createSubscription(array $data): ?Subscription
+    /**
+     * Backwards-compatible helper: retrieve a Stripe PaymentMethod by id.
+     */
+    public function getCardInfo(string $paymentMethodId): PaymentMethod
     {
-        try {
-            $subscription = Subscription::create([
-                'customer' => $data["customerId"],
-                'items' => [
-                    ['price' => $data["priceId"]],
-                ],
-                'payment_settings' => [
-                    'payment_method_types' => ['card'],
-                    'save_default_payment_method' => 'on_subscription',
-                    'payment_method_options' => [],
-                ],
-                'default_payment_method' => $data["paymentMethodId"],
-                'expand' => ['latest_invoice.payment_intent'],
-            ]);
-
-            return $subscription;
-        } catch (\Exception $e) {
-            Log::error("Stripe subscription error: " . $e->getMessage());
-            return null;
-        }
+        return $this->retrievePaymentMethod($paymentMethodId);
     }
 
-    public function getSubscription(string $subscriptionId): ?Subscription
+    /**
+     * Backwards-compatible helper to create a basic PaymentIntent from loose params.
+     */
+    public function createPaymentIntent(array $params): PaymentIntent
     {
-        try {
+        $amountCents = (int) round(($params['amount'] ?? 0) * 100);
+        $customerId = $params['stripe_customer_id'] ?? null;
+        $paymentMethodId = $params['payment_method_id'] ?? null;
 
-            $subscription = Subscription::retrieve($subscriptionId);
+        $payload = [
+            'amount' => $amountCents,
+            'currency' => $params['currency'] ?? 'usd',
+            'automatic_payment_methods' => ['enabled' => true],
+            'receipt_email' => $params['customer_email'] ?? null,
+        ];
 
-            return $subscription;
-        } catch (\Exception $e) {
-            Log::error("Stripe subscription retrieval error: " . $e->getMessage());
-            return null;
+        if ($customerId) {
+            $payload['customer'] = $customerId;
         }
+        if ($paymentMethodId) {
+            $payload['payment_method'] = $paymentMethodId;
+        }
+
+        return $this->stripe->paymentIntents->create($payload);
     }
 
-
-    public function retrieveInvoicePaymentIntent(string $invoiceId): ?PaymentIntent
+    /**
+     * Legacy signature shim; prefers payment_method id, falls back to token lookup.
+     */
+    public function getCard($customerOrToken, $stripeToken = null)
     {
-        try {
-            $invoice = Invoice::retrieve([
-                'id' => $invoiceId,
-                'expand' => ['payment_intent']
-            ]);
-            return $invoice->payment_intent;
-        } catch (\Exception $e) {
-            Log::error("Retrieve Invoice PaymentIntent error: " . $e->getMessage());
-            return null;
+        $id = $stripeToken ?? $customerOrToken;
+        if (str_starts_with($id, 'pm_')) {
+            return $this->retrievePaymentMethod($id);
         }
-    }
-
-    public function getCardInfo(string $paymentMethodId)
-    {
-        if (!$paymentMethodId) return;
-
-        return PaymentMethod::retrieve($paymentMethodId);
+        // legacy token retrieval
+        return $this->stripe->tokens->retrieve($id, []);
     }
 }
-
-
-
-
-//One-time appointment payment:
-// $customer = $stripe->findOrCreateCustomer($email, $name, $phone);
-
-// $stripe->createAndAttachPaymentMethod($paymentMethodId, $customer->id);
-
-// $intent = $stripe->createPaymentIntent([
-//     'amount' => 150, // in dollars
-//     'currency' => 'usd',
-//     'customer_id' => $customer->id,
-//     'payment_method_id' => $paymentMethodId,
-//     'email' => $email,
-//     'setup_future_usage' => 'off_session',
-//     'metadata' => [
-//         'appointment_id' => $appointment->id,
-//     ],
-// ]);
-
-
-//  Create subscription:
-// $customer = $stripe->findOrCreateCustomer($email, $name, $phone);
-// $stripe->createAndAttachPaymentMethod($paymentMethodId, $customer->id);
-// $subscription = $stripe->createSubscription($customer->id, $priceId, $paymentMethodId);

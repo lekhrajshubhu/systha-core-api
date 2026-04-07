@@ -3,28 +3,27 @@
 namespace Systha\Core\Http\Controllers\Api\V1\Platform\Auth;
 
 use Illuminate\Http\Request;
-use Systha\Core\Models\Client;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Systha\Core\Http\Controllers\Api\V1\Platform\PlatformBaseController;
+use Systha\Core\Models\Client;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use Tymon\JWTAuth\Exceptions\TokenExpiredException;
 
 /**
  * @group Platform
  * @subgroup Auth
-<<<<<<<< HEAD:src/Http/Controllers/Api/V1/Platform/Auth/AuthProfileController.php
+
  * @property-read \Tymon\JWTAuth\JWTGuard $platformGuard
  * @property-read ?\Systha\Core\Models\Client $user
  * @property-read \Tymon\JWTAuth\Token|string|null $token
  * @property-read array $profileData
  */
-class AuthProfileController extends PlatformBaseController
-{
-   
-========
- */
-class AuthClientApiController extends Controller
+
+class AuthClientApiController extends PlatformBaseController
 {
     public function login(Request $request)
     {
@@ -66,8 +65,6 @@ class AuthClientApiController extends Controller
 
         return response()->json(['token' => $token]);
     }
-
->>>>>>>> 18539635f4a2a7c24ea1f527231dffef47b3d97a:src/Http/Controllers/Api/V1/Platform/Auth/AuthClientApiController.php
     /**
      * @subgroup Profile
      */
@@ -308,8 +305,6 @@ class AuthClientApiController extends Controller
         return response()->json(['message' => 'Successfully logged out']);
     }
 
-<<<<<<<< HEAD:src/Http/Controllers/Api/V1/Platform/Auth/AuthProfileController.php
-========
     /**
      * @subgroup Auth
      */
@@ -347,5 +342,4 @@ class AuthClientApiController extends Controller
 
         return response()->json(['message' => 'A new password has been sent to your email.']);
     }
->>>>>>>> 18539635f4a2a7c24ea1f527231dffef47b3d97a:src/Http/Controllers/Api/V1/Platform/Auth/AuthClientApiController.php
 }

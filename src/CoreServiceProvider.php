@@ -36,7 +36,7 @@ use Systha\Core\Services\StripeService;
 
 class CoreServiceProvider extends ServiceProvider
 {
-    public function register(): void
+     public function register(): void
     {
         $this->app->singleton(EmailTemplateService::class, fn () => new EmailTemplateService());
         $this->app->singleton(QuotationService::class, fn () => new QuotationService());
@@ -62,7 +62,7 @@ class CoreServiceProvider extends ServiceProvider
 
         $this->loadViews();
         $this->sendOnlineMail();
-        // $this->loadCustomServices();
+        $this->loadCustomServices();
         $this->loadCustomMiddleware();
     }
 
@@ -161,7 +161,7 @@ class CoreServiceProvider extends ServiceProvider
 
     public function loadCustomServices(): void
     {
-        // $this->app->bind(MailServiceInterface::class, MailService::class);
+        $this->app->bind(MailServiceInterface::class, MailService::class);
     }
 
     public function loadCustomMiddleware(): void

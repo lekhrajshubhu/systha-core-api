@@ -5,6 +5,7 @@ namespace Systha\Core\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\Storage;
 
 class Package extends Model
 {
@@ -79,11 +80,10 @@ class Package extends Model
     public function getThumbnailUrlAttribute()
     {
         if ($this->package_thumb) {
-            $url = route('package.thumb', ['file_name' => $this->package_thumb]);
-            return $url;
+            return Storage::disk('media')->url('packages/images/' . $this->package_thumb);
         }
 
-        return asset('images/noimage.png');
+        return Storage::disk('media')->url('images/noimage.png');
     }
 
     //   Route::get('/package-image/{file_name}', [PackageViewController::class, 'packageImage'])->name('package.thumb');

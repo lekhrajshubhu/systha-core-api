@@ -11,6 +11,10 @@ class AddressModel extends Model
 {
     protected $table = "addresses";
     protected $guarded = [];
+
+    protected $casts = [
+        'is_default' => 'boolean',
+    ];
   
     public function addressable(): MorphTo
     {

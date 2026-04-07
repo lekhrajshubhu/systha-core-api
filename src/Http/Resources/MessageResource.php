@@ -2,10 +2,11 @@
 
 namespace Systha\Core\Http\Resources;
 
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Systha\Core\Models\ClientModel;
+use Systha\Core\Models\Vendor;
 
-class InquiryResource extends JsonResource
+class MessageResource extends JsonResource
 {
     /**
      * Transform the resource into an array.
@@ -15,53 +16,69 @@ class InquiryResource extends JsonResource
      */
     public function toArray($request): array
     {
+        $lastMessage = $this->lastMessage;
+        $title = 'Unknown';
+        $initials = 'UN';
+
+        if ($lastMessage) {
+            if ($lastMessage->table_from === 'vendors') {
+                $vendor = Vendor::find($lastMessage->table_from_id);
+                $title = $vendor ? $vendor->name : 'Unknown';
+                $initials = $this->initialsFromName($vendor?->name ?? '');
+            } elseif ($lastMessage->table_from === 'clients') {
+                $client = ClientModel::find($lastMessage->table_from_id);
+                $title = $client ? $client->fname : 'Unknown';
+                $initials = $this->initialsFromName($client?->fname ?? '');
+            } else {
+                $initials = $this->initialsFromName($title);
+            }
+        }
+
+        $preview = $lastMessage->message ?? '';
+        $preview = html_entity_decode(strip_tags($preview));
+        $time = optional($lastMessage)->created_at
+            ? $lastMessage->created_at->diffForHumans()
+            : '';
+        $avatarBg = '#dbeafe';
+        $unreadCount = $this->messages()->where('seen_client', 0)->count();
+
         return [
-            'id'            => $this->id,
-            'inquiry_no'    => $this->enq_no,
-
-            'client'        => [
-                "id"       => optional($this->client)->id,
-                "name"     => optional($this->client)->fullName,
-                "email"    => optional($this->client)->email,
-                "phone_no" => optional($this->client)->phone_no,
-            ],
-
-            'preferred_date'   => $this->preferred_date,
-            'preferred_time'   => $this->preferred_time,
-
-            'service_address' => [
-                "add1"    => optional($this->address)->add1,
-                "add2"    => optional($this->address)->add2,
-                "city"    => optional($this->address)->city,
-                "state"   => optional($this->address)->state,
-                "zip"     => optional($this->address)->zip,
-                "country" => optional($this->address)->country,
-            ],
-
-            'vendor' => [
-                "id"          => optional($this->vendor)->id,
-                "name"        => optional($this->vendor)->name,
-                "vendor_code" => optional($this->vendor)->vendor_code,
-            ],
-
-            // 👇 Multiple services
-            // 'services' => $this->enqServices->map(function ($service) {
-            //     return [
-            //         'id'   => $service->id,
-            //         'name' => $service->item_name,
-            //         'price' => $service->price ?? 0, // optional if pivot exists
-            //     ];
-            // }),
-            "service_count" => count($this->enqServices),
-            "quotes_count" => count($this->quotes),
-
-            'description'  => $this->description,
-            'is_emergency' => (bool) $this->is_emergency,
-
-            'status'       => $this->status,
-
-            'created_at'   => $this->created_at->toDateTimeString(),
-            'updated_at'   => $this->updated_at->toDateTimeString(),
+            'id' => (string) $this->id,
+            'title' => $title,
+            'preview' => $preview,
+            'time' => $time,
+            'initials' => $initials,
+            'avatarBg' => $avatarBg,
+            'unreadCount' => $unreadCount,
+            'isOnline' => false,
+            'messages' => $this->whenLoaded('messages', function () {
+                return $this->messages->map(function ($message) {
+                    return [
+                        'id' => $message->id,
+                        'message' => $message->message,
+                        'from_table' => $message->table_from,
+                        'from_id' => $message->table_from_id,
+                        'to_table' => $message->table_to,
+                        'to_id' => $message->table_to_id,
+                        'created_at' => optional($message->created_at)->toDateTimeString(),
+                    ];
+                });
+            }),
         ];
+    }
+
+    private function initialsFromName(string $name): string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return 'UN';
+        }
+
+        $parts = explode(' ', $name);
+        if (count($parts) === 1) {
+            return strtoupper(mb_substr($parts[0], 0, 2));
+        }
+
+        return strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
     }
 }

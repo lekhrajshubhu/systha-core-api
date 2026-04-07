@@ -2,18 +2,19 @@
 
 namespace Systha\Core\Models;
 
-use App\Model\NotificationDepartment;
-use App\Model\UserNotificationDepartmentRule;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Database\Eloquent\Relations\MorphOne;
-use Illuminate\Database\Eloquent\Relations\Relation;
+use Systha\Salon\Models\Quote;
 use Illuminate\Support\Facades\DB;
+use Systha\Core\Traits\Chat;
+use App\Model\NotificationDepartment;
 use Systha\Core\Models\Company;
+
+use Illuminate\Database\Eloquent\Model;
+
 use Systha\Core\Models\Subscription;
 use Systha\Core\Models\VendorTemplate;
-use Systha\Core\Traits\Chat;
-use Systha\Salon\Models\Quote;
+use App\Model\UserNotificationDepartmentRule;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\Storage;
 
 
 class Vendor extends Model
@@ -37,7 +38,7 @@ class Vendor extends Model
         'created_at',
         'client_id'
     ];
-    protected $appends = ["logo", "banner"];
+    protected $appends = ["logo","banner"];
 
     public static function boot()
     {
@@ -55,32 +56,23 @@ class Vendor extends Model
     public function getLogoAttribute()
     {
         if (!$this->template || !$this->profile_pic) {
-            return asset('images/noimage.webp');
+            return Storage::disk('media')->url('images/noimage.png');
         }
 
-        return route('media.show', ['filename' => $this->profile_pic]);
+        return Storage::disk('media')->url('venndors/attachments/' . $this->profile_pic);
     }
 
-    public function getBannerAttribute()
+     public function getBannerAttribute()
     {
         $bannerImage = $this->files()
             ->where('image_types', 'banner')
             ->latest('id')
             ->first();
-
-        return route('media.show', ['filename' => $bannerImage ? $bannerImage->file_name : 'noimage.png']);
+        
+        return route('media.show',['filename' => $bannerImage ? $bannerImage->file_name:'noimage.png']);
     }
 
 
-    public function addresses(): MorphMany
-    {
-        return $this->morphMany(AddressModel::class, 'addressable', 'table_name', 'table_id')->where('is_deleted', 0);
-    }
-    public function defaultAddress(): MorphOne
-    {
-        return $this->morphOne(AddressModel::class, 'addressable', 'table_name', 'table_id')
-            ->where('is_default', true);
-    }
 
     public function contact()
     {
@@ -105,7 +97,6 @@ class Vendor extends Model
     {
         return $this->morphMany(EcommFile::class, 'table_name', 'table_name', 'table_id')->where('ecomm_files.is_deleted', 0);
     }
-
 
     public function address()
     {
@@ -183,5 +174,22 @@ class Vendor extends Model
     public function packageList()
     {
         return $this->hasMany(Package::class, 'vendor_id', 'id')->where('is_deleted', 0);
+    }
+    public function offerList()
+    {
+        return $this->hasMany(Package::class, 'vendor_id', 'id')
+            ->where('is_deleted', 0)
+            ->whereNotNull('coupon_id');
+    }
+    public function scheduleList()
+    {
+        return $this->hasMany(Package::class, 'vendor_id', 'id')
+            ->where('is_deleted', 0)
+            ->whereNull('coupon_id');
+    }
+
+    public function services()
+    {
+        return $this->hasMany(Service::class, 'vendor_id', 'id')->whereNull('template_id')->where('is_deleted', 0);
     }
 }

@@ -26,22 +26,23 @@ class AttachmentModel extends Model
 
     public function getUrlAttribute(): ?string
     {
-        $path = $this->path
-            ?? $this->file_name
-            ?? null;
+        // $path = $this->path
+        //     ?? $this->file_name
+        //     ?? null;
 
-        if (!is_string($path) || $path === '') {
-            return null;
-        }
+        // if (!is_string($path) || $path === '') {
+        //     return null;
+        // }
 
-        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
-            return $path;
-        }
+        // // if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+        // //     return $path;
+        // // }
 
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('media');
 
-        return $disk->url($path);
+        return $disk->url($this->path);
+        // return $disk->url($path);
     }
 
     public static function storeUpload(UploadedFile $file, string $directory = 'attachments'): self

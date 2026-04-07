@@ -13,13 +13,16 @@ use Systha\Core\Http\Controllers\Api\V1\Platform\EmailLog\EmailLogController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Inquiry\InquiryController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Inquiry\InquiryStoreController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Inspection\InspectionController;
+use Systha\Core\Http\Controllers\Api\V1\Platform\Inspection\InspectionStoreController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Invoice\InvoiceController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Message\MessageController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Package\PackageViewController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Payment\PaymentController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\PaymentMethod\PaymentMethodController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Quotation\QuotationController;
+use Systha\Core\Http\Controllers\Api\V1\Platform\Service\ServiceShowController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\ServiceGroup\ServiceGroupShowController;
+use Systha\Core\Http\Controllers\Api\V1\Platform\Setting\SettingController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Subscription\SubscriptionController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Subscription\SubscriptionStoreController;
 use Systha\Core\Http\Controllers\Api\V1\Platform\Vendor\VendorController;
@@ -69,6 +72,8 @@ Route::group([
 
 
 	Route::get('/package-image/{file_name}', [PackageViewController::class, 'packageImage'])->name('package.thumb');
+
+	Route::get('/services/{id}', [ServiceShowController::class, 'getDetail'])->name('service.detail');
 
 
 	Route::group([
@@ -120,13 +125,27 @@ Route::group([
 		 * @group Platform
 		 * @subgroup Vendors
 		 */
-		Route::get('{code}/offers', [VendorController::class, 'offerList'])->name('platform.vendor.offer.list');
+	Route::get('{code}/offers', [VendorController::class, 'offerList'])->name('platform.vendor.offer.list');
 
-		/**
+	Route::get('{code}/schedules', [VendorController::class, 'scheduleList'])->name('platform.vendor.schedule.list');
+
+	/**
 		 * @group Platform
 		 * @subgroup Vendors
-		 */
-		Route::get('types', [VendorTypeController::class, 'index'])->name('platform.vendor.types');
+	 */
+	Route::get('types', [VendorTypeController::class, 'index'])->name('platform.vendor.types');
+	});
+
+	/**
+	 * @group Platform
+	 * @subgroup Payments
+	 */
+	Route::group([
+		'prefix' => 'recurring-subscriptions',
+	], function () {
+		Route::post('intent', [\Systha\Core\Http\Controllers\Api\V1\Platform\Subscription\RecurringSubscriptionController::class, 'createRecurringSubscriptionIntent']);
+		Route::post('finalize', [\Systha\Core\Http\Controllers\Api\V1\Platform\Subscription\RecurringSubscriptionController::class, 'finalizeRecurringSubscription']);
+		Route::post('charge-saved-card', [\Systha\Core\Http\Controllers\Api\V1\Platform\Subscription\RecurringSubscriptionController::class, 'chargeSavedCard']);
 	});
 
 	// Route::group([
@@ -171,7 +190,7 @@ Route::group([
 		 * @group Platform
 		 * @subgroup Inspections
 		 */
-		Route::post('/store', [InspectionController::class, 'store'])->name('platform.inspection.store');
+		Route::post('/store', [InspectionStoreController::class, 'store'])->name('platform.inspection.store');
 
 		Route::group(['middleware' => ['platform.token.refresh', 'auth:platform']], function () {
 			/**
@@ -202,6 +221,13 @@ Route::group([
 		 * @subgroup Profile
 		 */
 		Route::put('profile', [AuthProfileController::class, 'updateProfile'])->name('platform.update.profile.full');
+		Route::put('profile-general', [SettingController::class, 'profileGeneral'])->name('platform.update.profile.general');
+
+		Route::get('profile-address-list', [SettingController::class, 'profileAddressList'])->name('platform.update.profile.address.list');
+
+		Route::get('profile-address-list/{id}/detail', [SettingController::class, 'profileAddressDetail'])->name('platform.update.profile.address.detail');
+		Route::put('profile-address/{id}/update', [SettingController::class, 'profileAddressUpdate'])->name('platform.update.profile.address.update');
+		Route::delete('profile-address/{id}/delete', [SettingController::class, 'profileAddressDelete'])->name('platform.update.profile.address.delete');
 
 		/**
 		 * @group Platform
@@ -289,6 +315,14 @@ Route::group([
 			 * @group Platform
 			 * @subgroup Payments
 			 */
+			Route::get('', [PaymentMethodController::class, 'index'])->name('platform.payment.method.index');
+			Route::get('list', [PaymentMethodController::class, 'paymentMethodList'])->name('platform.payment.method.list');
+			Route::delete('{id}/delete', [PaymentMethodController::class, 'removePaymentMethod'])->name('platform.payment.method.remove');
+
+			/**
+			 * @group Platform
+			 * @subgroup Payments
+			 */
 			Route::post('create', [PaymentController::class, 'addPaymentMethod'])->name('platform.payment.method.create.store');
 
 			/**
@@ -311,13 +345,13 @@ Route::group([
 		});
 
 		Route::group([
-			'prefix' => 'conversations',
+			'prefix' => 'messages',
 		], function () {
 			/**
 			 * @group Platform
 			 * @subgroup Messages
 			 */
-			Route::get('', [MessageController::class, 'conversations'])->name('platform.conversation.list');
+			Route::get('', [MessageController::class, 'messageList'])->name('platform.conversation.list');
 
 			/**
 			 * @group Platform
@@ -329,7 +363,7 @@ Route::group([
 			 * @group Platform
 			 * @subgroup Messages
 			 */
-			Route::post('{id}/send-message', [MessageController::class, 'sendMessage'])->name('platform.message.send');
+			Route::post('{id}/send', [MessageController::class, 'sendMessage'])->name('platform.message.send');
 		});
 
 		Route::group([

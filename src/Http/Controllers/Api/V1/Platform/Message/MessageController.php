@@ -8,9 +8,12 @@ use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use PDO;
 use Systha\Core\Models\ChatConversation;
-use Systha\Core\Http\Resources\GlobalClientConversationResource;
+use Systha\Core\Http\Resources\MessageResource;
 use Systha\Core\Models\Vendor;
 use Systha\Core\Models\ClientModel;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
+use Systha\Core\Models\ServiceProvider;
 
 /**
  * @group Platform
@@ -19,7 +22,7 @@ use Systha\Core\Models\ClientModel;
 class MessageController extends Controller
 {
 
-    public function conversations(Request $request)
+    public function messageList(Request $request)
     {
         $client = auth('platform')->user();
 
@@ -45,68 +48,77 @@ class MessageController extends Controller
                 }
             }
 
-            $result = collect($filter)->map(function ($conv) {
-                $lastMessage = $conv->lastMessage;
-                $title = 'Unknown';
-                $initials = 'UN';
+            $search = trim($request->input('search', ''));
+            if ($search !== '') {
+                $searchLower = Str::lower($search);
+                $filter = collect($filter)->filter(function ($conv) use ($searchLower) {
+                    $fields = [];
 
-                if ($lastMessage) {
-                    if ($lastMessage->table_from === 'vendors') {
-                        $vendor = Vendor::find($lastMessage->table_from_id);
-                        $title = $vendor ? $vendor->name : 'Unknown';
-                        // Vendor initials logic
-                        if ($vendor && $vendor->name) {
-                            $parts = explode(' ', trim($vendor->name));
-                            if (count($parts) === 1) {
-                                $initials = strtoupper(mb_substr($parts[0], 0, 2));
-                            } else {
-                                $initials = strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
-                            }
-                        }
-                    } elseif ($lastMessage->table_from === 'clients') {
-                        $client = ClientModel::find($lastMessage->table_from_id);
-                        $title = $client ? $client->fname : 'Unknown';
-                        // Client initials logic
-                        if ($client && $client->fname) {
-                            $parts = explode(' ', trim($client->fname));
-                            if (count($parts) === 1) {
-                                $initials = strtoupper(mb_substr($parts[0], 0, 2));
-                            } else {
-                                $initials = strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
-                            }
-                        }
-                    } else {
-                        // Fallback for other types
-                        $initials = collect(explode(' ', $title))
-                            ->map(fn($w) => mb_substr($w, 0, 1))
-                            ->join('');
-                        $initials = strtoupper(mb_substr($initials, 0, 2));
+                    // computed title used in API response
+                    $fields[] = $this->conversationTitle($conv);
+
+                    // conversation title
+                    $fields[] = $conv->title ?? '';
+
+                    // last message text
+                    $fields[] = optional($conv->lastMessage)->message ?? '';
+
+                    // conversationable name variants
+                    if ($conv->conversationable) {
+                        $fields[] = $conv->conversationable->name ?? '';
+                        $fields[] = $conv->conversationable->fullName ?? '';
+                        $fields[] = $conv->conversationable->fname ?? '';
                     }
-                }
 
-                $preview = $lastMessage->message ?? '';
-                $preview = html_entity_decode(strip_tags($preview));
-                $time = optional($lastMessage)->created_at
-                    ? $lastMessage->created_at->diffForHumans()
-                    : '';
-                $avatarBg = '#dbeafe';
-                $unreadCount = $conv->messages()->where('seen_client', 0)->count();
-                $isOnline = false;
+                    foreach ($fields as $value) {
+                        if ($value !== null && $value !== '' && Str::contains(Str::lower($value), $searchLower)) {
+                            return true;
+                        }
+                    }
 
-                return [
-                    'id' => (string)$conv->id,
-                    'title' => $title,
-                    'preview' => $preview,
-                    'time' => $time,
-                    'initials' => $initials, // Always 2 characters
-                    'avatarBg' => $avatarBg,
-                    'unreadCount' => $unreadCount,
-                    'isOnline' => $isOnline,
-                ];
-            })->values();
+                    return false;
+                })->values()->all();
+            }
 
-            return response(['data' => $result], 200);
+            $perPage = (int) ($request->input('per_page') ?? 10);
+            $page = LengthAwarePaginator::resolveCurrentPage();
+            $filtered = collect($filter);
 
+            $paginated = new LengthAwarePaginator(
+                $filtered->forPage($page, $perPage)->values(),
+                $filtered->count(),
+                $perPage,
+                $page,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                ]
+            );
+
+            $unreadTotal = collect($filter)->sum(function ($conv) {
+                return $conv->messages()->where('seen_client', 0)->count();
+            });
+
+            $totalMessages = collect($filter)->sum(function ($conv) {
+                return $conv->messages()->count();
+            });
+
+            return response()->json([
+                'data' => MessageResource::collection($paginated->items()),
+                'meta' => [
+                    'current_page' => $paginated->currentPage(),
+                    'from' => $paginated->firstItem(),
+                    'last_page' => $paginated->lastPage(),
+                    'path' => $paginated->path(),
+                    'per_page' => $paginated->perPage(),
+                    'to' => $paginated->lastItem(),
+                    'total' => $paginated->total(),
+                ],
+                'message_count' => [
+                    'unread' => $unreadTotal,
+                    'total' => $totalMessages,
+                ],
+            ]);
         } catch (\Throwable $th) {
             return response(['error' => $th->getMessage()], 422);
         }
@@ -119,33 +131,56 @@ class MessageController extends Controller
             if (!$chatConv) {
                 return response(["error" => "Conversation not found."], 404);
             }
-            $contact = $client ? $client->contact : null;
-            $this->handleSeen($contact, $chatConv);
-            return response(["data" => $chatConv, "contact" => $contact], 200);
+
+            $this->handleSeen($client, $chatConv);
+
+            $messages = $chatConv->messages()
+                ->orderBy('created_at')
+                ->get()
+                ->map(function ($message) use ($client) {
+                    $senderName = $this->nameFromTable($message->table_from, $message->table_from_id);
+                    return [
+                        'id' => 'msg-' . $message->id,
+                        'role' => $this->isOutgoing($client, $message) ? 'outgoing' : 'incoming',
+                        'initials' => $this->initialsFromName($senderName),
+                        'text' => $message->message,
+                        'time' => optional($message->created_at)->format('g:i A'),
+                    ];
+                });
+
+            $vendorInfo = null;
+            $vendorMember = $chatConv->members()->where('table_name', 'vendors')->first();
+            if ($vendorMember) {
+                $vendorModel = Vendor::find($vendorMember->table_id);
+                if ($vendorModel) {
+                    $vendorInfo = [
+                        'id' => $vendorModel->id,
+                        'name' => $vendorModel->name,
+                        'code' => $vendorModel->vendor_code,
+                        'logo' => $vendorModel->logo ? asset($vendorModel->logo) : null,
+                    ];
+                }
+            }
+
+            return response([
+                "data" => $messages,
+                "client" => $client,
+                "vendor" => $vendorInfo,
+            ], 200);
         } catch (\Throwable $th) {
             // Error handling
             return response(["error" => $th->getMessage() . " line :" . $th->getFile()], 422);
         }
     }
-    public function handleSeen($contact, $chatConv)
+    public function handleSeen($client, $chatConv)
     {
-        if (!$contact) {
+        if (!$client) {
             return;
         }
 
-        if ($contact->table_name === 'clients') {
-            $chatConv->messages()
-                ->where('seen_client', 0) // Update only unseen messages
-                ->update(['seen_client' => 1]);
-        } elseif ($contact->table_name === 'vendors') {
-            $chatConv->messages()
-                ->where('seen_vendor', 0) // Update only unseen messages
-                ->update(['seen_vendor' => 1]);
-        } elseif ($contact->table_name === 'service_providers') {
-            $chatConv->messages()
-                ->where('seen_provider', 0) // Update only unseen messages
-                ->update(['seen_provider' => 1]);
-        }
+        $chatConv->messages()
+            ->where('seen_client', 0) // Update only unseen messages
+            ->update(['seen_client' => 1]);
     }
 
     public function sendMessage(Request $request, $conversationId)
@@ -194,12 +229,75 @@ class MessageController extends Controller
             "table_from" => $senderMember->table_name,
             "table_to_id" => $receiverMember->table_id,
             "table_to" => $receiverMember->table_name,
+            'seen_client' => 1,
         ]);
 
         return response([
             "data" => $message,
             "message" => "Message sent successfully",
         ], 201);
+    }
 
+    private function conversationTitle($conv): string
+    {
+        $title = 'Unknown';
+        $lastMessage = $conv->lastMessage;
+
+        if ($lastMessage) {
+            if ($lastMessage->table_from === 'vendors') {
+                $vendor = Vendor::find($lastMessage->table_from_id);
+                $title = $vendor ? $vendor->name : $title;
+            } elseif ($lastMessage->table_from === 'clients') {
+                $client = ClientModel::find($lastMessage->table_from_id);
+                $title = $client ? $client->fname : $title;
+            }
+        }
+
+        return $title ?? 'Unknown';
+    }
+
+    private function isOutgoing($client, $message): bool
+    {
+        if (!$client) {
+            return false;
+        }
+
+        return $message->table_from === $client->getTable()
+            && (int) $message->table_from_id === (int) $client->id;
+    }
+
+    private function nameFromTable($table, $id): string
+    {
+        if ($table === 'vendors') {
+            $vendor = Vendor::find($id);
+            return $vendor?->name ?? 'Unknown';
+        }
+
+        if ($table === 'clients') {
+            $client = ClientModel::find($id);
+            return $client?->fname ?? 'Unknown';
+        }
+
+        if ($table === 'service_providers') {
+            $sp = ServiceProvider::find($id);
+            return $sp?->name ?? 'Unknown';
+        }
+
+        return 'Unknown';
+    }
+
+    private function initialsFromName(string $name): string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return 'UN';
+        }
+
+        $parts = explode(' ', $name);
+        if (count($parts) === 1) {
+            return strtoupper(mb_substr($parts[0], 0, 2));
+        }
+
+        return strtoupper(mb_substr($parts[0], 0, 1) . mb_substr($parts[1], 0, 1));
     }
 }

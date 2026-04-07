@@ -15,6 +15,8 @@ use Systha\Core\Services\StripeService;
 
 class SubscriptionStoreHandler
 {
+    protected $stripe;
+
     public function __construct(
         protected ClientService $clientService,
         protected ClientOnboardingService $clientOnboardingService,
@@ -37,7 +39,7 @@ class SubscriptionStoreHandler
 
             $vendor = VendorModel::where('vendor_code', $data->vendorCode)->firstOrFail();
 
-            $stripe = app(StripeService::class, ['vendor' => $vendor]);
+            $this->stripe = app(StripeService::class, ['vendor' => $vendor]);
 
 
             $clientResult = $this->clientService->createOrUpdate($data->client);
@@ -58,13 +60,17 @@ class SubscriptionStoreHandler
                 $this->clientOnboardingService->sendWelcomeEmail($client, $plainPassword);
             }
 
+            // dd($data->stripe['id']);
+            $stripeToken = $data->stripe['id'] ?? null;
             /*
              |------------------------------------------------------------
              | 4. Create or fetch Stripe customer
              |------------------------------------------------------------
              */
-            $stripeCustomer = $stripe->findStripeCustomerForVendor($client, $vendor);
-            dd($stripeCustomer);
+            $stripeCustomer = $this->stripe->findStripeCustomerForVendor($client, $vendor);
+
+            $stripeCard = $this->stripe->getCard($stripeCustomer, $stripeToken);
+            dd($stripeCard);
             /*
              |------------------------------------------------------------
              | 5. Create Stripe subscription

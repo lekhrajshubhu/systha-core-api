@@ -3,18 +3,19 @@
 namespace Systha\Core\Lib\Subscription;
 
 use Exception;
-use Stripe\StripeClient;
 use Illuminate\Support\Carbon;
-use Systha\Core\Models\Vendor;
+use Illuminate\Support\Facades\Log;
 use Stripe\Exception\ApiErrorException;
-use Systha\Core\Models\TaxMaster;
+use Stripe\StripeClient;
 use Systha\Core\Models\PaymentCredential;
+use Systha\Core\Models\TaxMaster;
+use Systha\Core\Models\Vendor;
 
 class StripeSub
 {
     private $client;
 
-    public function __construct(?Vendor $vendor = null)
+    public function __construct(Vendor $vendor = null)
     {
         if ($vendor) {
             if ($pay = $vendor->defaultPaymentCredential && $vendor->defaultPaymentCredential->val2) {
@@ -28,6 +29,30 @@ class StripeSub
             $this->client = new StripeClient($pay->val2);
         }
     }
+
+    public function retrieveActiveCustomer(string $customerId)
+    {
+        // 1. Fetch customer with expanded payment method
+        $customer = $this->client->customers->retrieve($customerId);
+
+        // 2. Check if deleted
+        if (!empty($customer->deleted)) {
+            return null; // ❌ inactive
+        }
+
+        return $customer; // ✅ active
+
+    }
+
+    public function attachStripeTokenToCustomer(string $customerId, string $stripeToken)
+    {
+        return $this->client->customers->update(
+            $customerId,
+            ['source' => $stripeToken],
+            // ['expand' => ['default_source']]
+        );
+    }
+
 
     public function createCustomer(array $data)
     {
@@ -44,7 +69,7 @@ class StripeSub
         );
     }
 
-    public function retrieveCart($customer_id, $card_id)
+    public function retrieveCard($customer_id, $card_id)
     {
         return $this->client->customers->retrieveSource(
             $customer_id,
@@ -513,5 +538,18 @@ class StripeSub
             $invoice_id,
             []
         );
+    }
+    public function deleteCustomer(string $customerId)
+    {
+        try {
+            return $this->client->customers->delete($customerId);
+        } catch (\Exception $e) {
+            // Optionally log the error
+            Log::error('StripeSub: Failed to delete customer', [
+                'customer_id' => $customerId,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 }

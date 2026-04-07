@@ -84,7 +84,6 @@ class CustomMailService
         try {
             // Load latest SMTP config (vendor or default)
             $this->loadSmtpConfig($vendor);
-
             $mailer = Mail::build([
                 'transport' => 'smtp',
                 'host' => $this->smtpConfig['host'],
@@ -93,6 +92,7 @@ class CustomMailService
                 'password' => $this->smtpConfig['password'],
                 'encryption' => $this->smtpConfig['encryption'],
             ]);
+
 
             $fromEmail = $mailData['from_email'] ?? $this->smtpConfig['from_address'];
             $fromName = $mailData['from_name'] ?? $this->smtpConfig['from_name'];

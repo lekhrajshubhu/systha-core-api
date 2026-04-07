@@ -11,73 +11,32 @@
  */
 
 
-namespace Systha\Core\Http\Controllers\Api\V1\Platform\PaymentMethod;
+namespace Systha\Salon\Http\Controllers\Api\v3\Admin\Payment;
 
-
-use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Systha\Core\Http\Resources\PaymentMethodResource;
-use Systha\Core\Models\StripeCustomer;
-use Systha\Core\Models\StripePaymentMethod;
-use Systha\Core\Models\Vendor;
-use Systha\Core\Services\StripeService;
+use Systha\vendorpackage\Models\Vendor;
+use Systha\vendorpackage\Models\StripeCustomer;
+use Systha\vendorpackage\Services\StripeService;
+use Systha\Salon\Http\Controllers\Api\v3\ApiBaseController;
+use Systha\vendorpackage\Models\StripePaymentMethod;
 
-/**
- * @group Platform
- * @subgroup Payments
- */
-class PaymentMethodController extends Controller
+class PaymentMethodApiController extends ApiBaseController
 {
-    public function index(Request $request){
-        $client = auth('platform')->user();
+    public function paymentMethods(Request $request)
+    {
+        $contact = $this->getContact();
         try {
-            $stripeCustomer = StripeCustomer::where('client_id',$client->id)
-            ->with('paymentMethods')->with('defaultPaymentMethod')
-            ->first();
+            $stripeCustomer = StripeCustomer::where('client_id', $contact->table_id)
+                ->with('paymentMethods')->with('defaultPaymentMethod')
+                ->first();
             return response([
-                "data" => new PaymentMethodResource($stripeCustomer),
+                "data" => $stripeCustomer,
             ]);
         } catch (\Throwable $th) {
-            return response(["error"=>$th->getMessage()],422);
+            return response(["error" => $th->getMessage()], 422);
         }
     }
-    public function paymentMethodList(Request $request){
-        $client = auth('platform')->user();
-        try {
-            $stripeCustomer = StripeCustomer::where('client_id',$client->id)
-            ->with('paymentMethods')->with('defaultPaymentMethod')
-            ->first();
-            $resource = new PaymentMethodResource($stripeCustomer);
-
-            return response([
-                "data" => $resource->listResponse(),
-            ]);
-        } catch (\Throwable $th) {
-            return response(["error"=>$th->getMessage()],422);
-        }
-    }
-
-    public function removePaymentMethod(Request $request, $id){
-        $client = auth('platform')->user();
-        try {
-            $stripeCustomer = StripePaymentMethod::find($id);
-            if(!$stripeCustomer){
-                throw new \Exception("Payment method not found");
-            }
-
-            $stripeCustomer->update([
-                "is_deleted" => 1,
-                "deleted_at" => now(),
-            ]);
-            return response([
-                "message" => "Payment method removed successfully",
-            ],200);
-        } catch (\Throwable $th) {
-            return response(["error"=>$th->getMessage()],422);
-        }
-    }
-
-     public function addPaymentMethod(Request $request)
+    public function addPaymentMethod(Request $request)
     {
         $validated = $request->validate([
             "customer_name" => "required",

@@ -1,26 +1,35 @@
 <?php
 
-namespace Systha\Core\Http\Controllers\Api\V1\Platform\Inquiry;
+namespace Systha\Core\Http\Controllers\Api\V1\Platform\Inspection;
 
-use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
-use Systha\Core\DTO\InquiryStoreData;
-use Systha\Core\Handler\InquiryStoreHandler;
-use Systha\Core\Http\Requests\InquiryStoreRequest;
+use Systha\Core\DTO\InspectionStoreData;
+use Systha\Core\Handler\InspectionStoreHandler;
+use Systha\Core\Http\Controllers\Api\V1\Platform\PlatformBaseController;
+use Systha\Core\Http\Requests\InspectionStoreRequest;
+use Systha\Core\Http\Resources\InspectionResource;
 use Systha\Core\Models\Vendor;
 
-class InquiryStoreController extends Controller
+class InspectionStoreController extends PlatformBaseController
 {
     public function store(
-        InquiryStoreRequest $request,
-        InquiryStoreHandler $handler
+        InspectionStoreRequest $request,
+        InspectionStoreHandler $handler
     ): JsonResponse {
+        $dto = InspectionStoreData::fromArray(
+            $request->validated(),
+            $request->file('photos', [])
+        );
 
-        $dto = InquiryStoreData::fromArray($request->validated());
+        // header('Access-Control-Allow-Origin: *');
 
-        $inquiry = $handler->handle($dto);
+        $inquiry = $handler->handle($dto, $this->user?->id);
 
+        // return response()->json([
+        //     'message' => 'Inspection created successfully.',
+        //     'data' => new InspectionResource($inspection),
+        // ], 201);
         $inquiry->loadMissing(['client']);
 
         $vendor = Vendor::find($inquiry->vendor_id);
