@@ -1,0 +1,22 @@
+{
+  "name": "systha/core",
+  "type": "package",
+  "description": "Core package",
+  "require": {
+    "tymon/jwt-auth": "^2.2",
+    "laravel/helpers": "^1.7",
+    "stripe/stripe-php": "7.33"
+  },
+  "autoload": {
+    "psr-4": {
+      "Systha\\Core\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Systha\\Core\\CoreServiceProvider"
+      ]
+    }
+  }
+}
