@@ -42,8 +42,11 @@ class SubscriptionServiceContainer
 
             // dd($packageSubscription);
             // intialize stripe
+
+            header('Access-Control-Allow-Origin: *');
             $this->stripe = new StripeSub($packageType->vendor);
 
+            dd($this->stripe);
 
 
             // create stripe customer

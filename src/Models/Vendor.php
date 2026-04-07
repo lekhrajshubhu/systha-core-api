@@ -2,18 +2,18 @@
 
 namespace Systha\Core\Models;
 
-use Systha\Salon\Models\Quote;
-use Illuminate\Support\Facades\DB;
-use Systha\Core\Traits\Chat;
 use App\Model\NotificationDepartment;
-use Systha\Core\Models\Company;
-
+use App\Model\UserNotificationDepartmentRule;
 use Illuminate\Database\Eloquent\Model;
-
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\DB;
+use Systha\Core\Models\Company;
 use Systha\Core\Models\Subscription;
 use Systha\Core\Models\VendorTemplate;
-use App\Model\UserNotificationDepartmentRule;
-use Illuminate\Database\Eloquent\Relations\Relation;
+use Systha\Core\Traits\Chat;
+use Systha\Salon\Models\Quote;
 
 
 class Vendor extends Model
@@ -37,7 +37,7 @@ class Vendor extends Model
         'created_at',
         'client_id'
     ];
-    protected $appends = ["logo","banner"];
+    protected $appends = ["logo", "banner"];
 
     public static function boot()
     {
@@ -61,17 +61,26 @@ class Vendor extends Model
         return route('media.show', ['filename' => $this->profile_pic]);
     }
 
-     public function getBannerAttribute()
+    public function getBannerAttribute()
     {
         $bannerImage = $this->files()
             ->where('image_types', 'banner')
             ->latest('id')
             ->first();
-        
-        return route('media.show',['filename' => $bannerImage ? $bannerImage->file_name:'noimage.png']);
+
+        return route('media.show', ['filename' => $bannerImage ? $bannerImage->file_name : 'noimage.png']);
     }
 
 
+    public function addresses(): MorphMany
+    {
+        return $this->morphMany(AddressModel::class, 'addressable', 'table_name', 'table_id')->where('is_deleted', 0);
+    }
+    public function defaultAddress(): MorphOne
+    {
+        return $this->morphOne(AddressModel::class, 'addressable', 'table_name', 'table_id')
+            ->where('is_default', true);
+    }
 
     public function contact()
     {
@@ -96,6 +105,7 @@ class Vendor extends Model
     {
         return $this->morphMany(EcommFile::class, 'table_name', 'table_name', 'table_id')->where('ecomm_files.is_deleted', 0);
     }
+
 
     public function address()
     {

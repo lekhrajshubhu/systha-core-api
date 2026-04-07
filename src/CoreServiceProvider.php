@@ -18,7 +18,6 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Systha\Core\Commands\InstallCommand;
-use Systha\Core\Interfaces\MailServiceInterface;
 use Systha\Core\Lib\Services\MailTransporter;
 use Systha\Core\Mail\SendOnlineMail;
 use Systha\Core\Middleware\Cleaners\CleanCardNumber;
@@ -28,14 +27,12 @@ use Systha\Core\Middleware\Cleaners\CleanZipNumber;
 use Systha\Core\Middleware\EnsureAppCode;
 use Systha\Core\Middleware\RefreshPlatformToken;
 use Systha\Core\Middleware\VerifyVendorClientDomain;
-use Systha\Core\Models\Vendor;
+use Systha\Core\Models\VendorModel;
+use Systha\Core\ServiceContainer\StripeClientService;
 use Systha\Core\Services\CustomMailService;
-use Systha\Core\Services\DefaultMailService;
 use Systha\Core\Services\EmailTemplateService;
-use Systha\Core\Services\MailService;
 use Systha\Core\Services\QuotationService;
 use Systha\Core\Services\StripeService;
-use Systha\Core\Services\VendorMailService;
 
 class CoreServiceProvider extends ServiceProvider
 {
@@ -43,19 +40,12 @@ class CoreServiceProvider extends ServiceProvider
     {
         $this->app->singleton(EmailTemplateService::class, fn () => new EmailTemplateService());
         $this->app->singleton(QuotationService::class, fn () => new QuotationService());
-        $this->app->singleton(DefaultMailService::class, fn () => new DefaultMailService());
         $this->app->singleton(CustomMailService::class, fn () => new CustomMailService());
-
-        $this->app->bind(VendorMailService::class, function ($app, array $params) {
-            if (! isset($params['vendor']) || ! $params['vendor'] instanceof Vendor) {
-                throw new \InvalidArgumentException('Vendor instance must be passed when resolving VendorMailService');
-            }
-
-            return new VendorMailService($params['vendor']);
-        });
+        $this->app->singleton(StripeClientService::class, fn () => new StripeClientService());
+        
 
         $this->app->bind(StripeService::class, function ($app, array $params) {
-            if (! isset($params['vendor']) || ! $params['vendor'] instanceof Vendor) {
+            if (! isset($params['vendor']) || ! $params['vendor'] instanceof VendorModel) {
                 throw new \InvalidArgumentException('Vendor instance is required.');
             }
 
@@ -72,7 +62,7 @@ class CoreServiceProvider extends ServiceProvider
 
         $this->loadViews();
         $this->sendOnlineMail();
-        $this->loadCustomServices();
+        // $this->loadCustomServices();
         $this->loadCustomMiddleware();
     }
 
@@ -171,7 +161,7 @@ class CoreServiceProvider extends ServiceProvider
 
     public function loadCustomServices(): void
     {
-        $this->app->bind(MailServiceInterface::class, MailService::class);
+        // $this->app->bind(MailServiceInterface::class, MailService::class);
     }
 
     public function loadCustomMiddleware(): void

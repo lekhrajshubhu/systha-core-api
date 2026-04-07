@@ -1,21 +1,23 @@
 <?php
 
-namespace Systha\Core\Lib\Subscription;
+namespace Systha\Core\ServiceContainer;
 
 use Exception;
-use Stripe\StripeClient;
 use Illuminate\Support\Carbon;
-use Systha\Core\Models\Vendor;
 use Stripe\Exception\ApiErrorException;
-use Systha\Core\Models\TaxMaster;
+use Stripe\StripeClient;
 use Systha\Core\Models\PaymentCredential;
+use Systha\Core\Models\TaxMaster;
 
-class StripeSub
+use Systha\Core\Models\VendorModel;
+
+class StripeClientService
 {
-    private $client;
+    private StripeClient $client;
 
-    public function __construct(?Vendor $vendor = null)
+    public function __construct(?VendorModel $vendor = null)
     {
+        dd($vendor);
         if ($vendor) {
             if ($pay = $vendor->defaultPaymentCredential && $vendor->defaultPaymentCredential->val2) {
                 $this->client = new StripeClient($vendor->defaultPaymentCredential->val2);
@@ -72,9 +74,7 @@ class StripeSub
 
     public function createPlan($subscription)
     {
-        // dd($subscription->packageType);
         $package = $subscription->package;
-        // dd($this->client->products,$package);
         $p = $this->client->products->create([
             'name' => $package->package_name,
             'metadata' => [
@@ -118,7 +118,6 @@ class StripeSub
                 'package_id' => $package->id,
                 'package_name' => $package->package_name,
                 'image' => $package->package_thumb,
-                // 'price' => $package->price,
             ],
         ]);
 
@@ -135,8 +134,7 @@ class StripeSub
                 $taxamount = $tax->value;
             }
         }
-        // header('Access-Control-Allow-Origin:*');
-        // dd($p->id);
+
         return $p->id;
     }
 
@@ -156,8 +154,6 @@ class StripeSub
             $package->stripe_product_id = $p->id;
             $package->save();
         }
-
-        // dd($package->stripe_product_id);
 
         if ($package->vendor_id) {
             $tax = TaxMaster::where('tax_code', 'sales_tax')->where('vendor_id', $package->vendor_id)->where('is_deleted', 0)->first();
@@ -189,6 +185,7 @@ class StripeSub
             return null;
         }
     }
+
     public function updatePackageAsPlan($packageAsProduct)
     {
         $this->client->products->update(
@@ -257,107 +254,12 @@ class StripeSub
             'metadata' => $cart,
         ]);
     }
-    // public function createPackageSubscription($cart,$start_date,$type)
-    // {
-    //     //dd($cart,$start_date,$type);
-    //     $cart['package_type'] = $type;
-    //     $start_date = date_format(date_create($start_date),'U');
-    //     try {
-    //         return $this->client->subscriptions->create([
-    //             'customer' => $cart['customer_id'],
-    //             'items' => [
-    //                 ['price' => $cart['plan_id']],
-    //             ],
-    //             'metadata' => ["cart_id" => $cart['cart_id']],
-
-    //             'billing_cycle_anchor' => $start_date,
-    //         ]);
-    //         //code...
-    //     } catch (\Throwable $th) {
-    //         // header('Access-Control-Allow-Origin:*');
-    //         dd($th);
-    //         return $th->getMessage();
-    //     }
-    // }
-    // public function createPackageSubscription($cart, $start_date, $type)
-    // {
-    //     $cart['package_type'] = $type;
-
-    //     // Check if start_date is today, if so, set it to the current date.
-    //     if (Carbon::parse($start_date)->isToday()) {
-    //         $start_date = now()->format('U'); // Set to current timestamp
-    //     } else {
-    //         $start_date = Carbon::parse($start_date)->format('U'); // Convert provided start_date to timestamp
-    //     }
-
-    //     try {
-    //         return $this->client->subscriptions->create([
-    //             'customer' => $cart['customer_id'],
-    //             'items' => [
-    //                     ['price' => $cart['plan_id']],
-    //                 ],
-    //             //'metadata' => ["cart_id" => $cart['cart_id']],
-    //             'billing_cycle_anchor' => $start_date,
-    //         ]);
-    //     } catch (\Throwable $th) {
-    //         $errorMessage = $th->getMessage();
-
-    //         if (str_contains($errorMessage, 'billing_cycle_anchor')) {
-    //             throw new \Exception('Invalid subscription start date. The billing cycle must start in the future.');
-    //         }
-
-    //         throw new \Exception('Stripe Subscription Error: ' . $errorMessage);
-    //         // return $th->getMessage();
-    //     }
-    // }
-    // public function createPackageSubscription($cart, $start_date, $type)
-    // {
-    //     $cart['package_type'] = $type;
-
-    //     // Stripe requires billing_cycle_anchor to be in the future if used
-    //     $startTimestamp = Carbon::parse($start_date);
-    //     $now = now();
-
-    //     // If today, set no anchor (Stripe uses default)
-    //     $billingAnchor = null;
-    //     if ($startTimestamp->greaterThan($now)) {
-    //         $billingAnchor = $startTimestamp->timestamp;
-    //     }
-
-    //     try {
-    //         $params = [
-    //             'customer' => $cart['customer_id'],
-    //             'items' => [
-    //                 ['price' => $cart['plan_id']],
-    //             ],
-    //             // Optional: add metadata
-    //             //'metadata' => ['cart_id' => $cart['cart_id']],
-    //         ];
-
-    //         if ($billingAnchor) {
-    //             $params['billing_cycle_anchor'] = $billingAnchor;
-    //             $params['proration_behavior'] = 'none'; // Avoid unexpected prorations
-    //         }
-
-    //         return $this->client->subscriptions->create($params);
-    //     } catch (\Throwable $th) {
-    //         $message = $th->getMessage();
-
-    //         if (str_contains($message, 'billing_cycle_anchor')) {
-    //             throw new \Exception('Invalid subscription start date. It must be a future time.');
-    //         }
-
-    //         throw new \Exception('Stripe Subscription Error: ' . $message);
-    //     }
-    // }
-
 
     public function createPackageSubscription(array $cart, string $type)
     {
         $cart['package_type'] = $type;
 
-        // Always use “now + 60 seconds” to satisfy Stripe’s “must be future” rule
-        $billingAnchor = Carbon::now()->addSeconds(60)->timestamp;   // safe future time
+        $billingAnchor = Carbon::now()->addSeconds(60)->timestamp;
 
         $params = [
             'customer' => $cart['customer_id'],
@@ -365,22 +267,19 @@ class StripeSub
                 ['price' => $cart['plan_id']],
             ],
             'billing_cycle_anchor' => $billingAnchor,
-            'proration_behavior'   => 'none',   // avoid prorations
-            // 'metadata'          => ['cart_id' => $cart['cart_id']],
+            'proration_behavior'   => 'none',
         ];
 
         try {
             return $this->client->subscriptions->create($params);
         } catch (ApiErrorException $e) {
-            // Surface Stripe’s own message for easier debugging
-            throw new \Exception('Stripe Subscription Error: ' . $e->getMessage());
+            throw new Exception('Stripe Subscription Error: ' . $e->getMessage());
         }
     }
 
     public function createPackagePrice($subscription)
     {
         $package = $subscription->package;
-        // dd($subscription->packageType);
         if ($package->vendor_id) {
             $tax = TaxMaster::where('tax_code', 'sales_tax')->where('vendor_id', $package->vendor_id)->where('is_deleted', 0)->first();
         } else {
@@ -399,7 +298,6 @@ class StripeSub
             'unit_amount' => ($package->price + $taxamount) * 100,
             'currency' => 'usd',
             'recurring' => ['interval' => $this->interval(strtolower($subscription->packageType->type_name))],
-            // 'recurring' => ['interval' => $this->interval('weekly')],
             'product' => $package->stripe_product_id,
             'metadata' => [
                 'product_id' => $subscription->id,
@@ -410,17 +308,8 @@ class StripeSub
 
     public function createMembershipTypeAsProduct($membership, $type)
     {
-        // dd($subscription->packageType);
-        // $package = $subscription->package;
-        // dd($this->client->products,$package);
         $name = $membership->package_name . '-' . $type->type_name . 'ly';
-        // if($type->discount_type == 'percent'){
-        //     $type_amount = $type->amount - ($type->discount / 100 * $type->amount);
-        // }
 
-
-        // dd($type_amount);
-        // dd($name);
         if (!$membership->stripe_product_id) {
             $p = $this->client->products->create([
                 'name' => $membership->name,
@@ -433,8 +322,6 @@ class StripeSub
             $membership->stripe_product_id = $p->id;
             $membership->save();
         }
-
-        // dd($package->stripe_product_id);
 
         if ($membership->vendor_id) {
             $tax = TaxMaster::where('tax_code', 'sales_tax')->where('vendor_id', $membership->vendor_id)->where('is_deleted', 0)->first();
@@ -490,7 +377,6 @@ class StripeSub
 
     public function pauseSubscription($subscription_id)
     {
-        // dd($subscription_id);
         return $this->client->subscriptions->update(
             $subscription_id,
             ['pause_collection' => ['behavior' => 'void']]

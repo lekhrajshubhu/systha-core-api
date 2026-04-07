@@ -3,7 +3,7 @@
 namespace Systha\Core\Handler;
 
 use Illuminate\Support\Facades\DB;
-use Systha\Core\DTO\InquiryStoreData;
+use Systha\Core\DTO\InquiryStoreDto;
 use Systha\Core\Models\ClientModel;
 use Systha\Core\Models\InquiryModel;
 use Systha\Core\Models\Vendor;
@@ -13,7 +13,7 @@ use Systha\Core\Services\EmailLogoService;
 
 class InquiryStoreHandler
 {
-    public function handle(InquiryStoreData $data): InquiryModel
+    public function handle(InquiryStoreDto $data): InquiryModel
     {
         return DB::transaction(function () use ($data) {
             $vendorId = Vendor::query()

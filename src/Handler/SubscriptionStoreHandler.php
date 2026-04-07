@@ -3,84 +3,112 @@
 namespace Systha\Core\Handler;
 
 use Illuminate\Support\Facades\DB;
-use Systha\Core\DTO\SubscriptionStoreData;
-use Systha\Core\Models\Address;
-use Systha\Core\Models\ClientModel;
-use Systha\Core\Models\PackageSubscription;
-use Systha\Core\Models\PackageType;
-use Systha\Core\Models\SubscriptionModel;
-use Systha\Core\Models\Vendor;
-use Systha\Core\Models\VendorClient;
-use Systha\Core\Services\MessageService;
-use Systha\Core\Services\SubscriptionService;
-use Systha\Core\Services\SubscriptionServiceContainer;
+use Systha\Core\DTO\SubscriptionStoreDto;
+use Systha\Core\Models\VendorModel;
+use Systha\Core\ServiceContainer\AddressService;
+use Systha\Core\ServiceContainer\AppointmentService;
+use Systha\Core\ServiceContainer\ClientOnboardingService;
+use Systha\Core\ServiceContainer\ClientService;
+use Systha\Core\ServiceContainer\StripeCustomerService;
+use Systha\Core\ServiceContainer\StripeSubscriptionService;
+use Systha\Core\Services\StripeService;
 
 class SubscriptionStoreHandler
 {
-    protected $messageService;
-    protected $subscriptionService;
-    public function __construct(MessageService $messageService, SubscriptionServiceContainer $subscriptionService)
+    public function __construct(
+        protected ClientService $clientService,
+        protected ClientOnboardingService $clientOnboardingService,
+        protected AddressService $addressService,
+        protected StripeCustomerService $stripeCustomerService,
+        protected StripeSubscriptionService $stripeSubscriptionService,
+        protected AppointmentService $appointmentService,
+    ) {}
+
+    public function handle(SubscriptionStoreDto $data): array
     {
-        $this->messageService = $messageService;
-        $this->subscriptionService = $subscriptionService;
-    }
-    public function handle(SubscriptionStoreData $data)
-    {
+
+
         return DB::transaction(function () use ($data) {
-            $vendorId = Vendor::query()
-                ->where('vendor_code', $data->vendorCode)
-                ->value('id');
+            /*
+             |------------------------------------------------------------
+             | 1. Create or update client
+             |------------------------------------------------------------
+             */
 
-            if (!$vendorId) {
-                abort(422, 'Invalid vendor code.');
+            $vendor = VendorModel::where('vendor_code', $data->vendorCode)->firstOrFail();
+
+            $stripe = app(StripeService::class, ['vendor' => $vendor]);
+
+
+            $clientResult = $this->clientService->createOrUpdate($data->client);
+
+            $client = $clientResult['client'];
+
+            $plainPassword = $clientResult['plain_password'] ?? null;
+            $wasCreated = $clientResult['was_created'] ?? false;
+
+            /*
+             |------------------------------------------------------------
+             | 2. Create or update default address
+             |------------------------------------------------------------
+             */
+            if ($wasCreated) {
+
+                $this->addressService->createOrUpdateDefault($client, $data->address);
+                $this->clientOnboardingService->sendWelcomeEmail($client, $plainPassword);
             }
 
-            // Create or update client
-            $client = ClientModel::firstOrCreate(
-                [
-                    'email' => $data->email,
-                ],
-                [
-                    'phone_no' => $data->phone,
-                    'fname' => $data->firstName,
-                    'lname' => $data->lastName,
-                ]
-            );
-
-            if (! $client->wasRecentlyCreated) {
-                $client->update([
-                    'fname' => $data->firstName,
-                    'lname' => $data->lastName,
-                ]);
-            }
-
-            $vendorClient = VendorClient::firstOrCreate([
-                'vendor_id' => $vendorId,
-                'email' => $data->email,
-                'client_id' => $client->id,
-            ], [
-                'is_active' => 1,
-                'vendor_code' => $data->vendorCode,
+            /*
+             |------------------------------------------------------------
+             | 4. Create or fetch Stripe customer
+             |------------------------------------------------------------
+             */
+            $stripeCustomer = $stripe->findStripeCustomerForVendor($client, $vendor);
+            dd($stripeCustomer);
+            /*
+             |------------------------------------------------------------
+             | 5. Create Stripe subscription
+             |------------------------------------------------------------
+             */
+            $stripeSubscription = $this->stripeSubscriptionService->create([
+                'customer_id'       => $stripeCustomer->id,
+                'price_id'          => $data['stripePriceId'],
+                'payment_method_id' => $data['paymentMethodId'],
             ]);
 
-            $packageType = PackageType::query()
-                ->where('id', $data->planId)
-                ->where('vendor_id', $vendorId)
-                ->first();
-
-   
-            $address = Address::create([
-                'table_name' => 'clients',
-                'table_id' => $client->id,
-                'add1' => $data->addressLine1,
-                'add2' => $data->addressLine2,
-                'city' => $data->city,
-                'state' => $data->state,
-                'zip' => $data->zip,
+            /*
+             |------------------------------------------------------------
+             | 6. Save local subscription
+             |------------------------------------------------------------
+             */
+            $subscription = $client->subscriptions()->create([
+                'stripe_customer_id'     => $stripeCustomer->id,
+                'stripe_subscription_id' => $stripeSubscription['id'],
+                'stripe_price_id'        => $data['stripePriceId'],
+                'status'                 => $stripeSubscription['status'],
             ]);
 
-            $info = $this->subscriptionService->subscribe($packageType, $client,$address, $data->stripeToken, $data->startDate, $data->startTime);
-            return $info;
+            /*
+             |------------------------------------------------------------
+             | 7. Create appointment
+             |------------------------------------------------------------
+             */
+            $appointment = $this->appointmentService->createForClient($client, [
+                'subscription_id'        => $subscription->id,
+                'appointment_date'       => $data['appointmentDate'],
+                'appointment_time'       => $data['appointmentTime'],
+                'notes'                  => $data['appointmentNotes'],
+                'status'                 => 'pending',
+                'stripe_subscription_id' => $stripeSubscription['id'],
+            ]);
+
+            return [
+                'client' => $client,
+                'stripe_customer' => $stripeCustomer,
+                'subscription' => $subscription,
+                'stripe_subscription' => $stripeSubscription,
+                'appointment' => $appointment,
+            ];
         });
     }
 }

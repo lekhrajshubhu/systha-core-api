@@ -4,6 +4,7 @@ namespace Systha\Core\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Str;
 
@@ -49,6 +50,16 @@ class Company extends Model
             ->where('company_users.is_primary', 1);
     }
 
+    public function addresses(): MorphMany
+    {
+        return $this->morphMany(AddressModel::class, 'addressable', 'table_name', 'table_id')->where('is_deleted', 0);
+    }
+
+    public function defaultAddress(): MorphOne
+    {
+        return $this->morphOne(AddressModel::class, 'addressable', 'table_name', 'table_id')
+            ->where('is_default', true);
+    }
 
 
     public function attachmentUsages(): MorphMany
@@ -69,5 +80,5 @@ class Company extends Model
             ->where('meta->is_primary', true)
             ->with('attachment');
     }
-    
+
 }

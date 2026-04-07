@@ -3,7 +3,7 @@
 namespace Systha\Core\Http\Controllers\Api\V1\Platform\Subscription;
 
 use App\Http\Controllers\Controller;
-use Systha\Core\DTO\SubscriptionStoreData;
+use Systha\Core\DTO\SubscriptionStoreDto;
 use Systha\Core\Handler\SubscriptionStoreHandler;
 use Systha\Core\Http\Requests\RecurringRequest;
 
@@ -13,22 +13,28 @@ use Systha\Core\Http\Requests\RecurringRequest;
  */
 class SubscriptionStoreController extends Controller
 {
-    public function store(RecurringRequest $request,  SubscriptionStoreHandler $handler)
+    public function store(RecurringRequest $request, SubscriptionStoreHandler $handler)
     {
-        // $client = auth('platform')->user();
 
-        // header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Origin: *');
+    try {
 
-        $validated = $request->validated();
+        $dto = SubscriptionStoreDto::fromArray($request->validated());
 
-        $dto = SubscriptionStoreData::fromArray($validated);
+        $result = $handler->handle($dto);
 
-        $subscription = $handler->handle($dto);
-
-        return response([
+        dd($result);
+        return response()->json([
             'message' => 'Subscription created successfully',
-            'data' => $subscription
+            // 'data' => $subscription,
         ], 201);
-        // dd($validated);
+    } catch (\Throwable $th) {
+        //throw $th;
+        dd($th->getMessage());
+        return response()->json([
+            'message' => 'Failed to create subscription',
+            'error' => $th->getMessage(),
+        ], 500);
+    }
     }
 }

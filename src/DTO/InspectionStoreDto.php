@@ -4,7 +4,7 @@ namespace Systha\Core\DTO;
 
 use Illuminate\Http\UploadedFile;
 
-class InspectionStoreData
+class InspectionStoreDto
 {
     public readonly string $fname;
     public readonly ?string $lname;

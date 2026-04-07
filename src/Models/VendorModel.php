@@ -26,4 +26,9 @@ class VendorModel extends Model
 
         return route('media.show', ['filename' => $this->profile_pic]);
     }
+
+    public function defaultPaymentCredential()
+    {
+        return $this->hasOne(VendorPaymentCredential::class, 'vendor_id', 'id')->where('vendor_payment_credentials.is_default', 1);
+    }
 }

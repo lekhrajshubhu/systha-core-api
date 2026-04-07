@@ -5,7 +5,7 @@ namespace Systha\Core\Handler;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Systha\Core\DTO\InspectionStoreData;
+use Systha\Core\DTO\InspectionStoreDto;
 use Systha\Core\Models\AttachmentModel;
 use Systha\Core\Models\ClientModel;
 use Systha\Core\Models\InquiryModel;
@@ -13,7 +13,7 @@ use Systha\Core\Models\Vendor;
 
 class InspectionStoreHandler
 {
-    public function handle(InspectionStoreData $data, ?int $authenticatedClientId = null): InquiryModel
+    public function handle(InspectionStoreDto $data, ?int $authenticatedClientId = null): InquiryModel
     {
         return DB::transaction(function () use ($data, $authenticatedClientId) {
             $vendorId = Vendor::query()
@@ -57,7 +57,7 @@ class InspectionStoreHandler
         });
     }
 
-    protected function resolveClient(InspectionStoreData $data, ?int $authenticatedClientId = null): ClientModel
+    protected function resolveClient(InspectionStoreDto $data, ?int $authenticatedClientId = null): ClientModel
     {
         if ($authenticatedClientId) {
             $client = ClientModel::query()->findOrFail($authenticatedClientId);

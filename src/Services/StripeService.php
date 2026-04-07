@@ -12,23 +12,57 @@ use Stripe\PaymentMethod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Systha\Core\Models\Client;
-use Systha\Core\Models\Vendor;
+use Systha\Core\Models\ClientModel;
 use Systha\Core\Models\StripeCustomer;
+use Systha\Core\Models\VendorModel;
 
 class StripeService
 {
     protected string $secret;
     protected StripeClient $stripe;
 
-    public function __construct(Vendor $vendor)
+    public function __construct(VendorModel $vendor)
     {
-        $this->secret = $vendor->paymentCredential->val2;
+        $this->secret = $vendor->defaultPaymentCredential->val2;
 
         // For static methods (e.g. \Stripe\Customer::create())
         Stripe::setApiKey($this->secret);
 
         // For object-oriented methods
         $this->stripe = new StripeClient($this->secret);
+    }
+
+    public function findStripeCustomerForVendor(ClientModel $client, VendorModel $vendor): ?Customer
+    {
+        $stripeCustomer = StripeCustomer::where([
+            'client_id' => $client->id,
+            'vendor_id' => $vendor->id,
+        ])->first();
+
+        if ($stripeCustomer) {
+            return $this->stripe->customers->retrieve($stripeCustomer->stripe_customer_id, []);
+        }
+
+         $payload = [
+            'name' => trim($client->fname . ' ' . $client->lname),
+            'email' => $client->email,
+            'phone' => $client->phone1,
+            'metadata' => [
+                'client_id' => (int) $client->id,
+                'vendor_id' => (int) $vendor->id,
+            ],
+        ];
+
+        $customer = $this->stripe->customers->create($payload);
+        StripeCustomer::create([
+            'client_id' => $client->id,
+            'vendor_id' => $vendor->id,
+            'stripe_customer_id' => $customer->id,
+            'email' => $client->email,
+            'name' => trim($client->fname . ' ' . $client->lname),
+            'phone' => $client->phone1,
+        ]);
+        return $customer;
     }
 
 

@@ -4,7 +4,7 @@ namespace Systha\Core\Http\Controllers\Api\V1\Platform\Inspection;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Systha\Core\DTO\InspectionStoreData;
+use Systha\Core\DTO\InspectionStoreDto;
 use Systha\Core\Handler\InspectionStoreHandler;
 use Systha\Core\Http\Controllers\Api\V1\Platform\PlatformBaseController;
 use Systha\Core\Http\Requests\InspectionStoreRequest;
@@ -19,7 +19,7 @@ class InspectionController extends PlatformBaseController
         InspectionStoreHandler $handler
     ): JsonResponse
     {
-        $dto = InspectionStoreData::fromArray(
+        $dto = InspectionStoreDto::fromArray(
             $request->validated(),
             $request->file('photos', [])
         );

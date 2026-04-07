@@ -5,7 +5,7 @@ namespace Systha\Core\Http\Controllers\Api\V1\Platform\Inquiry;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
-use Systha\Core\DTO\InquiryStoreData;
+use Systha\Core\DTO\InquiryStoreDto;
 use Systha\Core\Handler\InquiryStoreHandler;
 use Systha\Core\Http\Requests\InquiryStoreRequest;
 use Systha\Core\Models\Vendor;
@@ -17,7 +17,7 @@ class InquiryStoreController extends Controller
         InquiryStoreHandler $handler
     ): JsonResponse {
 
-        $dto = InquiryStoreData::fromArray($request->validated());
+        $dto = InquiryStoreDto::fromArray($request->validated());
 
         $inquiry = $handler->handle($dto);
 
